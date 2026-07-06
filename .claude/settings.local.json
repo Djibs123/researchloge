@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(printf 'CROUS_SEARCH_URL=https://trouverunlogement.lescrous.fr/tools/42/search?maxPrice=10000&bounds=6.134292_48.7092349_6.2126188_48.666906&locationName=Nancy+%%2854000%%29\\\\nRESIDENCE_FILTER=\\\\n')",
+      "Bash(python test_search.py)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
