@@ -43,7 +43,8 @@ for _stream in (sys.stdout, sys.stderr):
 # --------------------------------------------------------------------------- #
 # Configuration (via .env)
 # --------------------------------------------------------------------------- #
-SEARCH_URL = os.getenv("CROUS_SEARCH_URL", "").strip()
+# Une ou plusieurs URL de recherche, séparées par des virgules (ex : campagnes 42 ET 47).
+SEARCH_URLS = [u.strip() for u in os.getenv("CROUS_SEARCH_URL", "").split(",") if u.strip()]
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 
 # Filtre optionnel sur le nom de résidence (mots-clés séparés par des virgules).
@@ -60,6 +61,8 @@ TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
 TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886").strip()
 TWILIO_CALL_FROM = os.getenv("TWILIO_CALL_FROM", "").strip()
+# Durée max de sonnerie (secondes) avant que Twilio abandonne l'appel. Max utile ~60.
+CALL_TIMEOUT = int(os.getenv("CALL_TIMEOUT", "60"))
 
 WHATSAPP_TO = [n.strip() for n in os.getenv("MY_WHATSAPP_NUMBERS", "").split(",") if n.strip()]
 CALL_TO = [n.strip() for n in os.getenv("MY_PHONE_NUMBERS", "").split(",") if n.strip()]
@@ -239,7 +242,7 @@ def notify(client, message, link):
     )
     for to in CALL_TO:
         try:
-            client.calls.create(from_=TWILIO_CALL_FROM, to=to, twiml=twiml)
+            client.calls.create(from_=TWILIO_CALL_FROM, to=to, twiml=twiml, timeout=CALL_TIMEOUT)
             log.info("Appel lancé vers %s", to)
         except Exception as e:
             log.error("Échec appel vers %s : %s", to, e)
@@ -249,16 +252,16 @@ def notify(client, message, link):
 # Boucle principale
 # --------------------------------------------------------------------------- #
 def main():
-    if not SEARCH_URL:
+    if not SEARCH_URLS:
         log.error("CROUS_SEARCH_URL manquant dans .env — arrêt.")
         sys.exit(1)
 
-    tool_id, body = build_search_request(SEARCH_URL)
+    searches = [build_search_request(u) for u in SEARCH_URLS]  # [(tool_id, body), ...]
     client = get_twilio()
     seen = load_seen()
 
     log.info("Démarrage du watcher CROUS")
-    log.info("  Zone (tool %s), prix max : %s centimes", tool_id, body["price"]["max"])
+    log.info("  Campagnes surveillées (tools) : %s", ", ".join(str(t) for t, _ in searches))
     log.info("  Filtre résidence : %s", RESIDENCE_FILTER or "AUCUN (tous les logements)")
     log.info("  Intervalle : %ss", CHECK_INTERVAL)
     log.info("  Twilio : %s | WhatsApp -> %s | Appel -> %s",
@@ -267,21 +270,35 @@ def main():
 
     while True:
         try:
-            items = fetch_logements(tool_id, body)
-            matching = [it for it in items if matches_filter(it)]
-            new = [it for it in matching if str(it.get("id")) not in seen]
+            total_seen_zone = 0
+            currently_available = {}  # id -> (tool_id, item), pour CE tour uniquement
+            new_found = []
 
-            if new:
-                log.info("🎉 %d NOUVEAU(X) logement(s) trouvé(s) !", len(new))
-                for it in new:
+            for tool_id, body in searches:
+                items = fetch_logements(tool_id, body)
+                total_seen_zone += len(items)
+                for it in items:
+                    if not matches_filter(it):
+                        continue
+                    item_id = str(it.get("id"))
+                    currently_available[item_id] = (tool_id, it)
+                    if item_id not in seen:
+                        new_found.append((tool_id, it))
+
+            if new_found:
+                log.info("🎉 %d NOUVEAU(X) logement(s) trouvé(s) !", len(new_found))
+                for tool_id, it in new_found:
                     name, message, link = describe(it, tool_id)
-                    log.info("Nouveau : %s", name)
+                    log.info("Nouveau : %s (tool %s)", name, tool_id)
                     notify(client, message, link)
-                    seen.add(str(it.get("id")))
-                save_seen(seen)
             else:
-                log.info("Rien de neuf (%d logement(s) dans la zone, %d après filtre).",
-                         len(items), len(matching))
+                log.info("Rien de neuf (%d logement(s) au total, %d après filtre).",
+                         total_seen_zone, len(currently_available))
+
+            # On ne garde que l'instantané ACTUEL : un logement qui disparaît puis
+            # revient (repris par qqn puis relibéré) redéclenchera une alerte.
+            seen = set(currently_available.keys())
+            save_seen(seen)
 
         except requests.RequestException as e:
             log.error("Erreur réseau : %s", e)

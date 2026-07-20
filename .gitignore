@@ -1,0 +1,12 @@
+# Secrets — NE JAMAIS committer
+.env
+
+# Données générées par le script
+seen_logements.json
+watcher.log
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
