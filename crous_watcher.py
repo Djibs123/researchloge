@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CROUS Watcher — surveille trouverunlogement.lescrous.fr et alerte (WhatsApp + appel)
+CROUS Watcher — surveille trouverunlogement.lescrous.fr et alerte par Telegram
 dès qu'un logement correspondant apparaît.
 
 Usage :
@@ -24,11 +24,6 @@ from urllib.parse import urlparse, parse_qs
 
 import requests
 from dotenv import load_dotenv
-
-try:
-    from twilio.rest import Client as TwilioClient
-except ImportError:  # twilio est optionnel pour un run "à sec"
-    TwilioClient = None
 
 load_dotenv()
 
@@ -56,16 +51,9 @@ RESIDENCE_FILTER = [
     if kw.strip()
 ]
 
-# Twilio
-TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
-TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
-TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886").strip()
-TWILIO_CALL_FROM = os.getenv("TWILIO_CALL_FROM", "").strip()
-# Durée max de sonnerie (secondes) avant que Twilio abandonne l'appel. Max utile ~60.
-CALL_TIMEOUT = int(os.getenv("CALL_TIMEOUT", "60"))
-
-WHATSAPP_TO = [n.strip() for n in os.getenv("MY_WHATSAPP_NUMBERS", "").split(",") if n.strip()]
-CALL_TO = [n.strip() for n in os.getenv("MY_PHONE_NUMBERS", "").split(",") if n.strip()]
+# Telegram (gratuit, sans limite). Bot créé via @BotFather ; chat_id = à qui envoyer.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_IDS = [c.strip() for c in os.getenv("TELEGRAM_CHAT_IDS", "").split(",") if c.strip()]
 
 SEEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen_logements.json")
 API_BASE = "https://trouverunlogement.lescrous.fr/api/fr/search"
@@ -202,50 +190,26 @@ def describe(item, tool_id):
 
 
 # --------------------------------------------------------------------------- #
-# Notifications Twilio
+# Notifications (Telegram)
 # --------------------------------------------------------------------------- #
-def get_twilio():
-    if not (TWILIO_SID and TWILIO_TOKEN):
-        return None
-    if TwilioClient is None:
-        log.warning("Package twilio non installé — pas de notification.")
-        return None
-    return TwilioClient(TWILIO_SID, TWILIO_TOKEN)
-
-
-def notify(client, message, link):
-    """Envoie WhatsApp à tous les numéros, puis appelle tous les numéros."""
-    if client is None:
-        log.warning("Twilio non configuré — j'affiche juste l'alerte :\n%s", message)
+def notify(message, link):
+    """Envoie le message à tous les chats Telegram configurés."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS):
+        log.warning("Telegram non configuré — alerte non envoyée :\n%s", message)
         return
 
-    # --- WhatsApp ---
-    for to in WHATSAPP_TO:
-        dest = to if to.startswith("whatsapp:") else f"whatsapp:{to}"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    for chat_id in TELEGRAM_CHAT_IDS:
         try:
-            client.messages.create(from_=TWILIO_WHATSAPP_FROM, to=dest, body=message)
-            log.info("WhatsApp envoyé à %s", to)
+            resp = requests.post(
+                url,
+                json={"chat_id": chat_id, "text": message, "disable_web_page_preview": False},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            log.info("Telegram envoyé à %s", chat_id)
         except Exception as e:
-            log.error("Échec WhatsApp vers %s : %s", to, e)
-
-    # --- Appel ---
-    if not TWILIO_CALL_FROM:
-        log.warning("TWILIO_CALL_FROM non défini — pas d'appel.")
-        return
-    twiml = (
-        "<Response><Say language=\"fr-FR\">"
-        "Alerte logement CROUS ! Un logement correspondant à ta recherche est disponible. "
-        "Regarde vite ton WhatsApp."
-        "</Say><Pause length=\"1\"/><Say language=\"fr-FR\">"
-        "Alerte logement CROUS ! Vérifie ton WhatsApp."
-        "</Say></Response>"
-    )
-    for to in CALL_TO:
-        try:
-            client.calls.create(from_=TWILIO_CALL_FROM, to=to, twiml=twiml, timeout=CALL_TIMEOUT)
-            log.info("Appel lancé vers %s", to)
-        except Exception as e:
-            log.error("Échec appel vers %s : %s", to, e)
+            log.error("Échec Telegram vers %s : %s", chat_id, e)
 
 
 # --------------------------------------------------------------------------- #
@@ -257,15 +221,15 @@ def main():
         sys.exit(1)
 
     searches = [build_search_request(u) for u in SEARCH_URLS]  # [(tool_id, body), ...]
-    client = get_twilio()
     seen = load_seen()
 
     log.info("Démarrage du watcher CROUS")
     log.info("  Campagnes surveillées (tools) : %s", ", ".join(str(t) for t, _ in searches))
     log.info("  Filtre résidence : %s", RESIDENCE_FILTER or "AUCUN (tous les logements)")
     log.info("  Intervalle : %ss", CHECK_INTERVAL)
-    log.info("  Twilio : %s | WhatsApp -> %s | Appel -> %s",
-             "OK" if client else "NON configuré", WHATSAPP_TO or "—", CALL_TO or "—")
+    log.info("  Telegram : %s | chats -> %s",
+             "OK" if (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS) else "NON configuré",
+             TELEGRAM_CHAT_IDS or "—")
     log.info("  %d logement(s) déjà connu(s).", len(seen))
 
     while True:
@@ -290,7 +254,7 @@ def main():
                 for tool_id, it in new_found:
                     name, message, link = describe(it, tool_id)
                     log.info("Nouveau : %s (tool %s)", name, tool_id)
-                    notify(client, message, link)
+                    notify(message, link)
             else:
                 log.info("Rien de neuf (%d logement(s) au total, %d après filtre).",
                          total_seen_zone, len(currently_available))

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test rapide SANS Twilio : vérifie que la recherche CROUS marche et affiche
+Test rapide SANS notif : vérifie que la recherche CROUS marche et affiche
 ce qui est trouvé dans ta zone. Lance : python test_search.py
 """
 from crous_watcher import build_search_request, fetch_logements, matches_filter, describe, SEARCH_URLS
