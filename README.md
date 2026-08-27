@@ -1,94 +1,145 @@
 # CROUS Watcher 🏠
 
-Surveille les logements CROUS (site [trouverunlogement.lescrous.fr](https://trouverunlogement.lescrous.fr))
-et t'alerte **par WhatsApp + appel téléphonique** dès qu'un logement correspondant
-à ta recherche apparaît. Pensé pour ne **pas rater** la résidence **Monbois Libération** à Nancy.
+Surveille les logements CROUS ([trouverunlogement.lescrous.fr](https://trouverunlogement.lescrous.fr))
+et alerte par **Telegram** dès qu'un logement correspondant apparaît sur une ou
+plusieurs zones surveillées.
 
 ## Comment ça marche
 
-1. Le script lit l'URL de recherche que tu vois dans ton navigateur (ville, prix…).
-2. Toutes les 60 s, il interroge l'API du CROUS.
-3. Il compare avec les logements déjà vus (`seen_logements.json`).
-4. Nouveau logement (filtré sur "Monbois Libération" par défaut) → **WhatsApp avec le lien direct + appel** pour te réveiller.
+1. `crous_watcher.py` interroge l'API du CROUS toutes les `CHECK_INTERVAL` secondes,
+   pour chaque zone configurée dans `CROUS_SEARCH_URL` (une ou plusieurs URLs de
+   recherche, séparées par des virgules).
+2. Chaque zone est vérifiée **indépendamment des autres** : une erreur passagère sur
+   une zone (l'API CROUS renvoie parfois une erreur 400 aléatoire) n'empêche jamais
+   de vérifier les autres au même cycle, et un réessai automatique (3 tentatives)
+   rattrape la plupart de ces erreurs transitoires.
+3. L'historique des logements déjà vus est suivi **par zone** (`seen_logements.json`) :
+   un logement qui disparaît puis redevient disponible (repris par quelqu'un puis
+   relibéré) redéclenche une alerte.
+4. Nouveau logement trouvé → message **Telegram** avec le lien direct, envoyé à tous
+   les destinataires **approuvés**.
+5. Le watcher écrit aussi un instantané d'état (`status.json`) à chaque cycle — lu
+   par le dashboard, jamais par le watcher lui-même.
+
+### Inscription et validation des destinataires
+
+Il n'y a plus d'auto-acceptation. Le fonctionnement :
+- Un noyau fixe de destinataires est configuré dans `.env` (`TELEGRAM_CHAT_IDS`),
+  toujours actif.
+- N'importe qui peut envoyer `/start` au bot Telegram → sa demande arrive **en
+  attente de validation** (pas d'accès immédiat).
+- L'admin valide/refuse chaque demande depuis le **dashboard web** (`dashboard.py`).
+  Seuls les destinataires "approved" reçoivent les alertes.
 
 ---
 
-## 1. Installation
+## Installation locale
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env      # (Windows PowerShell : copy .env.example .env)
+cp .env.example .env      # (PowerShell : copy .env.example .env)
 ```
 
-## 2. Tester la recherche (sans Twilio)
+Remplis `.env` :
+- `CROUS_SEARCH_URL` : une ou plusieurs URLs de recherche CROUS (voir plus bas
+  comment les obtenir), séparées par des virgules
+- `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_IDS` : voir la section Telegram ci-dessous
+- Les `DASHBOARD_*` : voir la section Dashboard ci-dessous
 
-Remplis d'abord `CROUS_SEARCH_URL` dans `.env` (l'URL de ta recherche Nancy est déjà pré-remplie), puis :
+## Tester la recherche (sans notifier)
 
 ```bash
 python test_search.py
 ```
+Affiche les logements actuellement disponibles sur les zones configurées, sans
+envoyer aucune notification. Normal si c'est vide (le watcher attend simplement
+qu'un logement apparaisse).
 
-Ça affiche les logements actuellement dispo dans ta zone. Normal si c'est vide : ça veut dire qu'il n'y a rien en ce moment, et c'est justement le boulot du script d'attendre qu'il y en ait un.
+## Tester une alerte Telegram réelle
 
-## 3. Configurer Twilio (WhatsApp + appel)
+```bash
+python test_alert.py
+```
+Envoie un vrai message de test à tous les destinataires approuvés — utile pour
+vérifier que le circuit de notification fonctionne de bout en bout.
 
-Twilio est le service qui envoie les WhatsApp et passe les appels. Compte d'essai gratuit avec crédits.
-
-1. Crée un compte sur [twilio.com](https://www.twilio.com/try-twilio).
-2. Sur la [console](https://console.twilio.com), récupère **Account SID** et **Auth Token** → dans `.env`.
-3. **WhatsApp sandbox** : Console → *Messaging → Try it out → Send a WhatsApp message*.
-   Suis les instructions : depuis **chaque** téléphone destinataire, envoie le code `join xxxx-xxxx`
-   au numéro Twilio indiqué. (⚠️ à refaire si tu ne l'utilises pas pendant 72 h.)
-4. **Appels** : Console → *Phone Numbers* → prends le numéro Twilio offert → mets-le dans `TWILIO_CALL_FROM`.
-   En compte d'essai, **vérifie chaque numéro** que tu veux appeler (Console → *Verified Caller IDs*).
-5. Mets tes numéros (format `+33…`) dans `MY_WHATSAPP_NUMBERS` et `MY_PHONE_NUMBERS`
-   (plusieurs numéros = séparés par des virgules).
-
-## 4. Lancer
+## Lancer le watcher
 
 ```bash
 python crous_watcher.py
 ```
-
-Laisse la fenêtre ouverte. Les logs s'affichent et sont aussi écrits dans `watcher.log`.
-
----
-
-## Trouver ton URL de recherche
-
-Va sur [trouverunlogement.lescrous.fr](https://trouverunlogement.lescrous.fr), filtre par ville
-(Nancy) et prix. L'URL dans la barre d'adresse contient `?maxPrice=...&bounds=...`.
-Copie-la entièrement dans `CROUS_SEARCH_URL`.
-
-## Filtrer une résidence précise
-
-Dans `.env`, `RESIDENCE_FILTER=monbois,libération` → tu n'es alerté que pour cette résidence.
-Laisse **vide** pour être alerté de **tous** les logements de la zone (recommandé si tu es flexible).
+Logs affichés à l'écran + écrits dans `watcher.log`. `Lancer_surveillance.bat`
+(Windows) fait la même chose avec redémarrage automatique en cas de plantage —
+pratique pour un test local, mais **la façon normale de faire tourner ça en continu
+est le déploiement 24/7 décrit dans [HOSTING.md](HOSTING.md)**, pas un PC allumé
+en permanence.
 
 ---
 
-## Le faire tourner 24/7
+## Configurer Telegram
 
-Le script doit tourner en continu → ton PC doit rester allumé et connecté.
-Pour du 24/7 fiable, héberge-le sur une machine toujours allumée :
+1. Crée un bot via [@BotFather](https://t.me/BotFather) (commande `/newbot`) →
+   il te donne un `TELEGRAM_BOT_TOKEN`.
+2. Envoie n'importe quel message à ton bot pour qu'il connaisse ton `chat_id`.
+3. Récupère-le via `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+4. Mets ce chat_id dans `TELEGRAM_CHAT_IDS` (noyau fixe, plusieurs possibles,
+   séparés par des virgules) — ces destinataires sont toujours actifs, non
+   modifiables depuis le dashboard (seulement via `.env`).
+5. Toute autre personne s'inscrit en envoyant `/start` au bot — sa demande apparaît
+   "en attente" sur le dashboard.
 
-- **Raspberry Pi** (si tu en as un) — idéal.
-- **VPS pas cher** : Hetzner / OVH (~3-4 €/mois), ou **Oracle Cloud Free Tier** (gratuit à vie).
+## Configurer le dashboard
 
-Sur un serveur Linux, utilise le service systemd fourni (`crous-watcher.service`)
-pour qu'il redémarre tout seul après un reboot ou un plantage. Instructions en tête du fichier.
+Le dashboard (Flask + Waitress) affiche le statut du watcher (zones surveillées,
+logements dispo, dernière erreur) et permet d'accepter/refuser les demandes
+Telegram en attente.
 
-Lancement rapide en arrière-plan (sans systemd) :
 ```bash
-nohup python3 crous_watcher.py > watcher.log 2>&1 &
+python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('TON_MOT_DE_PASSE'))"
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+Renseigne le résultat dans `DASHBOARD_PASSWORD_HASH` / `DASHBOARD_SECRET_KEY`
+(voir `.env.example` pour la liste complète des variables `DASHBOARD_*`), puis :
+```bash
+python dashboard.py
 ```
 
 ---
 
-## ⚠️ Notes importantes
+## Trouver une URL de recherche
 
-- **Sandbox WhatsApp** : gratuit mais chaque numéro doit "rejoindre" et re-rejoindre toutes les 72 h.
-  Pour du définitif, il faut un numéro WhatsApp Business validé (payant).
-- **Compte d'essai Twilio** : appels seulement vers des numéros **vérifiés**, avec un court message d'intro Twilio.
-- Reste **raisonnable sur la fréquence** (60 s est correct). Un intervalle trop agressif pourrait
-  faire bloquer ton IP par le CROUS.
+Va sur [trouverunlogement.lescrous.fr](https://trouverunlogement.lescrous.fr),
+filtre par ville/zone et prix (zoome sur la carte pour ajuster la zone exacte).
+L'URL dans la barre d'adresse contient `bounds=...&locationName=...`. Copie-la
+entièrement dans `CROUS_SEARCH_URL`. Pour surveiller plusieurs zones (ou plusieurs
+campagnes CROUS), sépare les URLs par des virgules.
+
+> ⚠️ Le CROUS gère plusieurs campagnes en parallèle (`tool_id` dans l'URL, ex
+> `/tools/47/`), avec des inventaires totalement indépendants les unes des autres
+> — vérifie régulièrement laquelle est active (les campagnes changent avec le
+> calendrier universitaire).
+
+## Filtrer une résidence précise (optionnel)
+
+Dans `.env`, `RESIDENCE_FILTER=monbois,libération` → alerte seulement pour cette
+résidence. Laisse **vide** (recommandé) pour être alerté de tous les logements des
+zones surveillées.
+
+---
+
+## Faire tourner ça 24/7
+
+Voir **[HOSTING.md](HOSTING.md)** — déploiement complet sur Oracle Cloud Free Tier
+(gratuit à vie), avec les deux services systemd (`crous-watcher` + `crous-dashboard`)
+et le dashboard exposé en HTTPS via Caddy.
+
+## Structure du projet
+
+| Fichier | Rôle |
+|---|---|
+| `crous_watcher.py` | Boucle principale : interroge le CROUS, détecte les nouveautés, notifie |
+| `subscriber_store.py` | Gestion des destinataires (pending/approved/rejected), accès concurrent sûr |
+| `telegram_client.py` | Envoi/lecture de messages Telegram |
+| `dashboard.py` + `templates/` | Dashboard web (statut + validation des demandes) |
+| `test_search.py` / `test_alert.py` | Scripts de test manuels |
+| `HOSTING.md` | Déploiement 24/7 (Oracle Cloud + Caddy) |

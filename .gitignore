@@ -1,9 +1,17 @@
 # Secrets — NE JAMAIS committer
 .env
+*.key
+*.pem
+ssh-key*
 
 # Données générées par le script
 seen_logements.json
-watcher.log
+telegram_subscribers.json
+telegram_subscribers.json.backup
+status.json
+*.lock
+*.tmp
+*.log
 
 # Python
 __pycache__/

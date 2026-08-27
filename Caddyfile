@@ -1,0 +1,11 @@
+# Reverse proxy HTTPS pour le dashboard.
+# sslip.io résout automatiquement 141-145-223-184.sslip.io -> 141.145.223.184,
+# ce qui permet à Caddy d'obtenir un vrai certificat Let's Encrypt sans domaine.
+#
+# Installation :
+#   sudo cp Caddyfile /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+
+141-145-223-184.sslip.io {
+	reverse_proxy 127.0.0.1:8080
+}

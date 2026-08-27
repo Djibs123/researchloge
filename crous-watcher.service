@@ -1,5 +1,5 @@
 # Service systemd — fait tourner le watcher 24/7 et le redémarre tout seul
-# (reboot du serveur ou plantage). Conçu pour un VPS Ubuntu (Hetzner).
+# (reboot du serveur ou plantage). Conçu pour un VPS Ubuntu (Oracle Cloud, user "ubuntu").
 #
 # Installation (voir HOSTING.md pour le détail) :
 #   sudo cp crous-watcher.service /etc/systemd/system/
@@ -8,14 +8,15 @@
 #   journalctl -u crous-watcher -f      # suivre les logs en direct
 
 [Unit]
-Description=CROUS Watcher - surveillance logement + alerte WhatsApp/appel
+Description=CROUS Watcher - surveillance logement + alerte Telegram
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/researchloge
-ExecStart=/usr/bin/python3 /root/researchloge/crous_watcher.py
+User=ubuntu
+WorkingDirectory=/home/ubuntu/researchloge
+ExecStart=/usr/bin/python3 /home/ubuntu/researchloge/crous_watcher.py
 Restart=always
 RestartSec=15
 

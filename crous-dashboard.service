@@ -1,0 +1,23 @@
+# Service systemd du dashboard web (Waitress sur 127.0.0.1:8080, exposé en
+# HTTPS par Caddy). Voir HOSTING.md.
+#
+#   sudo cp crous-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now crous-dashboard
+#   journalctl -u crous-dashboard -f
+
+[Unit]
+Description=CROUS Watcher - dashboard web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/researchloge
+ExecStart=/usr/bin/python3 /home/ubuntu/researchloge/dashboard.py
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

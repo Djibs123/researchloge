@@ -1,87 +1,114 @@
-# Héberger le CROUS Watcher sur un VPS Hetzner (24/7)
+# Héberger le CROUS Watcher (Oracle Cloud, gratuit à vie)
 
-Guide pas-à-pas. Objectif : le script tourne tout seul, même PC éteint, et redémarre
-automatiquement en cas de reboot ou plantage.
+Le projet tourne 24/7 sur une VM **Oracle Cloud Free Tier** (Ubuntu 24.04, x86
+E2.1.Micro, 1GB RAM). Deux services systemd tournent en parallèle :
 
----
-
-## Partie A — Créer le serveur (dans ton navigateur)
-
-1. Va sur **[hetzner.com/cloud](https://www.hetzner.com/cloud)** → **Sign Up**.
-2. Crée le compte, valide ton email, ajoute un moyen de paiement (carte ou PayPal).
-   > Hetzner peut demander une petite vérification d'identité au 1er compte — c'est normal.
-3. Une fois connecté à la **Cloud Console** : **+ New Project** → nomme-le `crous`.
-4. Dans le projet → **Add Server** :
-   - **Location** : Nuremberg ou Falkenstein (Allemagne).
-   - **Image** : **Ubuntu 24.04**.
-   - **Type** : le moins cher — **CAX11** (ARM, ~3,79 €/mois) suffit largement.
-   - **Networking** : laisse IPv4 coché.
-   - **SSH Key** : ignore pour l'instant (on utilisera un mot de passe).
-   - **Name** : `crous-watcher`.
-   - Clique **Create & Buy now**.
-5. Hetzner t'envoie par **email** l'**adresse IP** du serveur et le **mot de passe root**.
-   (ou l'IP s'affiche dans la console). Garde-les sous la main.
-
-➡️ **Reviens avec l'adresse IP** et on fait la suite ensemble.
+- **`crous-watcher`** — le script de surveillance + alertes Telegram
+- **`crous-dashboard`** — le dashboard web (suivi + validation manuelle des demandes),
+  exposé en HTTPS via **Caddy** (reverse proxy, certificat automatique via sslip.io)
 
 ---
 
-## Partie B — Se connecter et installer (depuis ton PC Windows)
+## Infos serveur actuel
 
-Ouvre **PowerShell** sur ton PC et remplace `IP_DU_SERVEUR` par la vraie IP.
+- IP publique : `141.145.223.184`
+- Utilisateur SSH : `ubuntu` (pas root)
+- Chemin projet : `/home/ubuntu/researchloge`
+- Connexion : `ssh -i ssh-key-2026-08-07.key ubuntu@141.145.223.184`
+- Dashboard : `https://141-145-223-184.sslip.io`
 
-### 1. Copier le projet sur le serveur
+---
+
+## Déployer une modification (workflow habituel)
+
+Depuis PowerShell sur ton PC, dans le dossier du projet :
+
 ```powershell
-scp -r "c:\Users\samba\projetPerso\researchloge" root@IP_DU_SERVEUR:/root/
-```
-(Il demandera `yes` la 1ère fois, puis le mot de passe root.)
-
-### 2. Se connecter au serveur
-```powershell
-ssh root@IP_DU_SERVEUR
+$key = "ssh-key-2026-08-07.key"
+scp -i $key crous_watcher.py subscriber_store.py telegram_client.py dashboard.py `
+    requirements.txt ubuntu@141.145.223.184:/home/ubuntu/researchloge/
+scp -i $key -r templates ubuntu@141.145.223.184:/home/ubuntu/researchloge/templates
 ```
 
-### 3. Installer Python et les dépendances (sur le serveur)
+⚠️ **Ne jamais écraser le `.env` distant par scp** (il contient des secrets live qui
+peuvent avoir divergé du local) — édite-le à la main sur le serveur (`nano .env`).
+
+Puis sur le serveur (`ssh ubuntu@141.145.223.184`) :
+
 ```bash
-apt update && apt install -y python3-pip
-cd /root/researchloge
+cd /home/ubuntu/researchloge
+pip3 install -r requirements.txt --break-system-packages
+sudo systemctl restart crous-watcher crous-dashboard
+sudo systemctl status crous-watcher crous-dashboard
+```
+
+---
+
+## Installation complète depuis zéro
+
+### 1. Dépendances Python
+```bash
+sudo apt update && sudo apt install -y python3-pip
+cd /home/ubuntu/researchloge
 pip3 install -r requirements.txt --break-system-packages
 ```
 
-### 4. Vérifier que tout est là
+### 2. Les deux services systemd
 ```bash
-python3 test_search.py        # doit interroger le CROUS sans erreur
+sudo cp crous-watcher.service crous-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now crous-watcher
+sudo systemctl enable --now crous-dashboard
 ```
 
-### 5. Lancer en service permanent
+### 3. Caddy (reverse proxy HTTPS pour le dashboard)
+Le dashboard écoute en interne sur `127.0.0.1:8080` (jamais exposé directement).
+Caddy sert le HTTPS sur `141-145-223-184.sslip.io` (domaine gratuit qui pointe
+automatiquement vers l'IP du serveur — pas besoin d'acheter un nom de domaine).
+
 ```bash
-cp crous-watcher.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now crous-watcher
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+
+sudo cp Caddyfile /etc/caddy/Caddyfile
+sudo systemctl reload caddy
 ```
 
-### 6. Vérifier que ça tourne
+### 4. Pare-feu Oracle Cloud (étape manuelle, dans le navigateur)
+Console Oracle Cloud → **Compute → Instances → crous-watcher** → VCN associé →
+**Subnet → Security Lists → Add Ingress Rules** :
+- Source CIDR `0.0.0.0/0`, TCP, port **80** (challenge Let's Encrypt + redirection)
+- Source CIDR `0.0.0.0/0`, TCP, port **443** (HTTPS du dashboard)
+
+(Le port 22 pour SSH est déjà ouvert par défaut. Pas besoin d'ouvrir le 8080 —
+Caddy est le seul point d'entrée public, le dashboard reste interne.)
+
+### 5. Config `.env` du dashboard
+Génère un mot de passe et une clé secrète (en local ou sur le serveur) :
 ```bash
-systemctl status crous-watcher      # doit afficher "active (running)"
-journalctl -u crous-watcher -f      # logs en direct (Ctrl+C pour quitter)
+python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('TON_MOT_DE_PASSE'))"
+python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
+Ajoute dans `.env` (voir `.env.example` pour la liste complète) :
+`DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD_HASH`, `DASHBOARD_SECRET_KEY`,
+`DASHBOARD_PORT=8080`, `DASHBOARD_HOST=127.0.0.1`, `DASHBOARD_COOKIE_SECURE=true`
+(⚠️ `true` en prod puisque c'est servi en HTTPS derrière Caddy).
 
 ---
 
 ## Au quotidien
 
-- **Voir les logs** : `journalctl -u crous-watcher -f`
-- **Redémarrer** : `systemctl restart crous-watcher`
-- **Arrêter** : `systemctl stop crous-watcher`
-- **Modifier la config** : édite `/root/researchloge/.env` puis `systemctl restart crous-watcher`
+- **Logs watcher** : `journalctl -u crous-watcher -f`
+- **Logs dashboard** : `journalctl -u crous-dashboard -f`
+- **Logs Caddy** (si le HTTPS ne marche pas) : `journalctl -u caddy -f`
+- **Redémarrer** : `sudo systemctl restart crous-watcher` / `crous-dashboard`
+- **Modifier la config** : édite `/home/ubuntu/researchloge/.env` puis redémarre le(s) service(s) concerné(s)
 
 ## Quand tu as trouvé ton logement 🎉
 
-1. Arrête le service : `systemctl stop crous-watcher`
-2. Dans la Cloud Console Hetzner → supprime le serveur (**Delete**) pour arrêter la facturation.
-
-## ⚠️ Rappel WhatsApp sandbox
-
-Le sandbox Twilio se désactive après **72h sans activité**. Pour rester connecté,
-chaque numéro renvoie de temps en temps `join period-hunter` au **+1 415 523 8886**.
-(Le script t'enverra quand même l'appel même si le WhatsApp expire.)
+1. `sudo systemctl stop crous-watcher crous-dashboard caddy`
+2. Console Oracle Cloud → supprime l'instance (`crous-watcher`) pour libérer les ressources
+   (même en Always Free, propre de nettoyer).

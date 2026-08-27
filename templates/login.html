@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion — CROUS Watcher</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #0f172a; color: #e2e8f0; padding: 1rem;
+    }
+    .card {
+      background: #1e293b; padding: 2rem; border-radius: 12px; width: 100%; max-width: 360px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    h1 { margin: 0 0 1.5rem; font-size: 1.25rem; }
+    label { display: block; margin-bottom: .35rem; font-size: .85rem; color: #94a3b8; }
+    input {
+      width: 100%; padding: .6rem .75rem; margin-bottom: 1rem; border-radius: 7px;
+      border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 1rem;
+    }
+    button {
+      width: 100%; padding: .7rem; border: 0; border-radius: 7px; cursor: pointer;
+      background: #3b82f6; color: #fff; font-size: 1rem; font-weight: 600;
+    }
+    button:hover { background: #2563eb; }
+    .flash { background: #7f1d1d; color: #fecaca; padding: .6rem .75rem; border-radius: 7px; margin-bottom: 1rem; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <form class="card" method="post">
+    <h1>🏠 CROUS Watcher</h1>
+    {% with messages = get_flashed_messages() %}
+      {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+    {% endwith %}
+    <label for="username">Identifiant</label>
+    <input id="username" name="username" autocomplete="username" autofocus required>
+    <label for="password">Mot de passe</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Se connecter</button>
+  </form>
+</body>
+</html>

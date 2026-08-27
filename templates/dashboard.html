@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="60">
+  <title>CROUS Watcher — Dashboard</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #0f172a; color: #e2e8f0; padding: 1rem;
+    }
+    .wrap { max-width: 1000px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.3rem; margin: 0; }
+    h2 { font-size: 1rem; margin: 2rem 0 .75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; }
+    a.logout { color: #94a3b8; font-size: .85rem; }
+    .pill { display: inline-block; padding: .3rem .7rem; border-radius: 999px; font-size: .8rem; font-weight: 600; }
+    .pill.on { background: #14532d; color: #86efac; }
+    .pill.off { background: #7f1d1d; color: #fecaca; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; }
+    .card { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .card .n { font-size: 1.6rem; font-weight: 700; }
+    .card .l { font-size: .78rem; color: #94a3b8; margin-top: .2rem; }
+    table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 10px; overflow: hidden; }
+    .scroll { overflow-x: auto; }
+    th, td { text-align: left; padding: .65rem .8rem; font-size: .88rem; border-bottom: 1px solid #334155; }
+    th { background: #172033; color: #94a3b8; font-size: .78rem; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .muted { color: #64748b; font-size: .85rem; }
+    button { border: 0; border-radius: 6px; padding: .4rem .8rem; cursor: pointer; font-size: .85rem; font-weight: 600; }
+    .ok { background: #16a34a; color: #fff; }
+    .no { background: #dc2626; color: #fff; }
+    .tag { font-size: .72rem; padding: .15rem .5rem; border-radius: 5px; background: #334155; color: #cbd5e1; }
+    .flash { background: #1e3a5f; color: #bfdbfe; padding: .6rem .8rem; border-radius: 8px; margin-bottom: 1rem; font-size: .9rem; }
+    .err { background: #7f1d1d; color: #fecaca; padding: .7rem .9rem; border-radius: 8px; margin: 1rem 0; font-size: .87rem; }
+    form { display: inline; }
+    a { color: #60a5fa; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏠 CROUS Watcher</h1>
+    <div>
+      {% if online %}<span class="pill on">● En ligne</span>
+      {% else %}<span class="pill off">● Hors ligne</span>{% endif %}
+      <a class="logout" href="{{ url_for('logout') }}">Déconnexion</a>
+    </div>
+  </header>
+
+  {% with messages = get_flashed_messages() %}
+    {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% endwith %}
+
+  {% if status %}
+    <div class="grid">
+      <div class="card"><div class="n">{{ status.total_available }}</div><div class="l">Logements dispo</div></div>
+      <div class="card"><div class="n">{{ status.zones|length }}</div><div class="l">Zones surveillées</div></div>
+      <div class="card"><div class="n">{{ approved|length }}</div><div class="l">Destinataires</div></div>
+      <div class="card"><div class="n">{{ pending|length }}</div><div class="l">Demandes en attente</div></div>
+    </div>
+    <p class="muted" style="margin-top:.75rem">
+      Vérification toutes les {{ status.check_interval }}s ·
+      dernière {{ age_seconds }}s
+      {% if status.residence_filter %}· filtre : {{ status.residence_filter|join(', ') }}{% endif %}
+    </p>
+    {% if status.last_error %}<div class="err">⚠️ {{ status.last_error }}</div>{% endif %}
+  {% else %}
+    <div class="err">Aucun status.json — le watcher n'a pas encore tourné.</div>
+  {% endif %}
+
+  <h2>Demandes en attente ({{ pending|length }})</h2>
+  {% if pending %}
+  <div class="scroll"><table>
+    <tr><th>Nom</th><th>Chat ID</th><th>Demandé le</th><th></th></tr>
+    {% for s in pending %}
+    <tr>
+      <td>{{ s.name or '—' }}</td>
+      <td class="muted">{{ s.chat_id }}</td>
+      <td class="muted">{{ s.requested_at[:16].replace('T',' ') if s.requested_at }}</td>
+      <td style="white-space:nowrap">
+        <form method="post" action="{{ url_for('approve', chat_id=s.chat_id) }}"><button class="ok">Accepter</button></form>
+        <form method="post" action="{{ url_for('reject', chat_id=s.chat_id) }}"><button class="no">Refuser</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">Aucune demande en attente.</p>{% endif %}
+
+  <h2>Destinataires actifs ({{ approved|length }})</h2>
+  <div class="scroll"><table>
+    <tr><th>Nom</th><th>Chat ID</th><th>Source</th><th></th></tr>
+    {% for s in approved %}
+    <tr>
+      <td>{{ s.name or '—' }}</td>
+      <td class="muted">{{ s.chat_id }}</td>
+      <td><span class="tag">{{ 'fixe (.env)' if s.source == 'env' else s.source }}</span></td>
+      <td style="white-space:nowrap">
+        {% if s.source != 'env' %}
+        <form method="post" action="{{ url_for('reject', chat_id=s.chat_id) }}"><button class="no">Retirer</button></form>
+        {% else %}<span class="muted">via .env</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+
+  {% if rejected %}
+  <h2>Refusés ({{ rejected|length }})</h2>
+  <div class="scroll"><table>
+    <tr><th>Nom</th><th>Chat ID</th><th></th></tr>
+    {% for s in rejected %}
+    <tr>
+      <td>{{ s.name or '—' }}</td>
+      <td class="muted">{{ s.chat_id }}</td>
+      <td><form method="post" action="{{ url_for('approve', chat_id=s.chat_id) }}"><button class="ok">Accepter</button></form></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+
+  {% if status and status.listings %}
+  <h2>Logements actuellement disponibles</h2>
+  <div class="scroll"><table>
+    <tr><th>Résidence</th><th>Type</th><th>Surface</th><th>Loyer</th><th></th></tr>
+    {% for l in status.listings %}
+    <tr>
+      <td>{{ l.name }}<br><span class="muted">{{ l.address }}</span></td>
+      <td>{{ l.type }}</td>
+      <td>{% if l.area_m2 %}{{ '%.0f'|format(l.area_m2) }} m²{% else %}—{% endif %}</td>
+      <td>{% if l.rent_eur %}{{ '%.0f'|format(l.rent_eur) }} €{% else %}—{% endif %}</td>
+      <td><a href="{{ l.link }}" target="_blank" rel="noopener">Voir</a></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+
+  {% if status and status.zones %}
+  <h2>Zones surveillées</h2>
+  <div class="scroll"><table>
+    <tr><th>Zone</th><th>Campagne</th><th>Logements</th></tr>
+    {% for z in status.zones %}
+    <tr><td>{{ z.label }}</td><td class="muted">tool {{ z.tool_id }}</td><td>{{ z.matched_count }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+</div>
+</body>
+</html>
