@@ -37,6 +37,13 @@
     .flash { background: #1e3a5f; color: #bfdbfe; padding: .6rem .8rem; border-radius: 8px; margin-bottom: 1rem; font-size: .9rem; }
     .err { background: #7f1d1d; color: #fecaca; padding: .7rem .9rem; border-radius: 8px; margin: 1rem 0; font-size: .87rem; }
     form { display: inline; }
+    details.rejected { margin-top: 2rem; }
+    details.rejected > summary { cursor: pointer; color: #64748b; font-size: .82rem; list-style: none; }
+    details.rejected > summary::-webkit-details-marker { display: none; }
+    details.rejected > summary::before { content: '▸ '; }
+    details.rejected[open] > summary::before { content: '▾ '; }
+    details.rejected > summary:hover { color: #94a3b8; }
+    details.rejected > .scroll { margin-top: .6rem; }
     a { color: #60a5fa; }
   </style>
 </head>
@@ -108,17 +115,21 @@
   </table></div>
 
   {% if rejected %}
-  <h2>Refusés ({{ rejected|length }})</h2>
-  <div class="scroll"><table>
-    <tr><th>Nom</th><th>Chat ID</th><th></th></tr>
-    {% for s in rejected %}
-    <tr>
-      <td>{{ s.name or '—' }}</td>
-      <td class="muted">{{ s.chat_id }}</td>
-      <td><form method="post" action="{{ url_for('approve', chat_id=s.chat_id) }}"><button class="ok">Accepter</button></form></td>
-    </tr>
-    {% endfor %}
-  </table></div>
+  {# Refusés/retirés : masqués par défaut (ils n'ont plus rien à valider). On garde
+     quand même la liste dépliable pour rattraper un refus fait par erreur. #}
+  <details class="rejected">
+    <summary>{{ rejected|length }} personne{{ 's' if rejected|length > 1 }} refusée{{ 's' if rejected|length > 1 }} ou retirée{{ 's' if rejected|length > 1 }}</summary>
+    <div class="scroll"><table>
+      <tr><th>Nom</th><th>Chat ID</th><th></th></tr>
+      {% for s in rejected %}
+      <tr>
+        <td>{{ s.name or '—' }}</td>
+        <td class="muted">{{ s.chat_id }}</td>
+        <td><form method="post" action="{{ url_for('approve', chat_id=s.chat_id) }}"><button class="ok">Réintégrer</button></form></td>
+      </tr>
+      {% endfor %}
+    </table></div>
+  </details>
   {% endif %}
 
   {% if status and status.listings %}
