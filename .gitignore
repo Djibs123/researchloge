@@ -13,6 +13,10 @@ status.json
 *.tmp
 *.log
 
+# Second projet (bot national), avec son propre dépôt git.
+# Sans cette ligne, un « git add . » ici l'embarquerait par erreur.
+projetCrous/
+
 # Python
 __pycache__/
 *.pyc

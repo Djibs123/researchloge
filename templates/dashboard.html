@@ -45,6 +45,32 @@
     details.rejected > summary:hover { color: #94a3b8; }
     details.rejected > .scroll { margin-top: .6rem; }
     a { color: #60a5fa; }
+    /* Repère fort de la vue en cours : sans ça, on ne sait plus de quelle
+       liste d'abonnés on est en train de changer le statut. */
+    .projet-titre { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+    .projet-titre h2 { margin: 0; font-size: 1.15rem; color: #e2e8f0; text-transform: none; letter-spacing: 0; }
+    .projet-sous { color: #64748b; font-size: .84rem; margin: .3rem 0 1.1rem; }
+    /* Menu latéral : une seule vue affichée à la fois. */
+    .layout { display: flex; gap: 1.5rem; align-items: flex-start; }
+    .nav { flex: 0 0 190px; position: sticky; top: 1rem; }
+    .nav a {
+      display: flex; align-items: center; gap: .55rem; padding: .6rem .8rem;
+      border-radius: 8px; color: #94a3b8; text-decoration: none; font-size: .9rem;
+      font-weight: 600; margin-bottom: .3rem; border: 1px solid transparent;
+    }
+    .nav a:hover { background: #1e293b; color: #e2e8f0; }
+    .nav a.actif { background: #1e293b; color: #e2e8f0; border-color: #3b82f6; }
+    .nav .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+    .nav .dot.on { background: #22c55e; }
+    .nav .dot.off { background: #ef4444; }
+    .nav .badge { margin-left: auto; background: #b45309; color: #fff; font-size: .7rem;
+                  padding: .1rem .4rem; border-radius: 999px; }
+    .contenu { flex: 1; min-width: 0; }
+    @media (max-width: 700px) {
+      .layout { flex-direction: column; }
+      .nav { position: static; flex: 1 1 auto; width: 100%; display: flex; gap: .4rem; }
+      .nav a { flex: 1; margin-bottom: 0; justify-content: center; }
+    }
   </style>
 </head>
 <body>
@@ -61,6 +87,30 @@
   {% with messages = get_flashed_messages() %}
     {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
   {% endwith %}
+
+  <div class="layout">
+  <nav class="nav">
+    <a href="{{ url_for('index', vue='nancy') }}" class="{{ 'actif' if vue == 'nancy' }}">
+      <span class="dot {{ 'on' if online else 'off' }}"></span> Nancy
+      {% if pending %}<span class="badge">{{ pending|length }}</span>{% endif %}
+    </a>
+    {% if national %}
+    <a href="{{ url_for('index', vue='national') }}" class="{{ 'actif' if vue == 'national' }}">
+      <span class="dot {{ 'on' if national.en_ligne else 'off' }}"></span> National
+      {% if national.pending %}<span class="badge">{{ national.pending|length }}</span>{% endif %}
+    </a>
+    {% endif %}
+  </nav>
+
+  <div class="contenu">
+
+  {% if vue == 'nancy' %}
+  <div class="projet-titre" style="margin-bottom:.3rem">
+    <h2>📍 Nancy</h2>
+    {% if online %}<span class="pill on">● En ligne</span>
+    {% else %}<span class="pill off">● Hors ligne</span>{% endif %}
+  </div>
+  <p class="projet-sous">Surveillance ciblée des zones de Nancy · alertes Telegram</p>
 
   {% if status %}
     <div class="grid">
@@ -157,6 +207,126 @@
     {% endfor %}
   </table></div>
   {% endif %}
+  {% endif %}{# fin vue nancy #}
+
+  {# ------------------------------------------------------------------ #}
+  {# Second bot : surveillance nationale (projetCrous)                   #}
+  {# ------------------------------------------------------------------ #}
+  {% if vue == 'national' and national %}
+  <div>
+    <div class="projet-titre">
+      <h2>🇫🇷 National</h2>
+      {% if national.en_ligne %}<span class="pill on">● En ligne</span>
+      {% else %}<span class="pill off">● Hors ligne</span>{% endif %}
+    </div>
+    <p class="projet-sous">
+      Toute la France, {{ national.statut.zones_total or 0 }} villes · chacun choisit ses villes
+      {% if national.age is not none %} · dernier passage il y a {{ national.age }}s{% endif %}
+    </p>
+
+    <div class="grid">
+      <div class="card"><div class="n">{{ national.statut.listings_total or 0 }}</div><div class="l">Annonces en France</div></div>
+      <div class="card"><div class="n">{{ national.zones|length }}</div><div class="l">Villes avec annonces</div></div>
+      <div class="card"><div class="n">{{ national.actifs_total }}</div><div class="l">Destinataires</div></div>
+      <div class="card"><div class="n">{{ national.pending|length }}</div><div class="l">Demandes en attente</div></div>
+    </div>
+
+    {% if national.statut.errors %}
+      {% for campagne, erreur in national.statut.errors.items() %}
+      <div class="err">⚠️ Campagne {{ campagne }} : {{ erreur }}</div>
+      {% endfor %}
+    {% endif %}
+
+    <h2>Demandes en attente ({{ national.pending|length }})</h2>
+    {% if national.pending %}
+    <div class="scroll"><table>
+      <tr><th>Nom</th><th>Contact</th><th>Villes demandées</th><th>Demandé le</th><th></th></tr>
+      {% for c in national.pending %}
+      <tr>
+        <td>{{ c.name or '—' }}</td>
+        <td class="muted">{{ c.address }}<br><span class="tag">{{ c.channel }}</span></td>
+        <td class="muted">{{ c.zones_libelles|join(', ') if c.zones_libelles else '—' }}</td>
+        <td class="muted">{{ c.requested_at[:16].replace('T',' ') if c.requested_at }}</td>
+        <td style="white-space:nowrap">
+          <form method="post" action="{{ url_for('national_decision') }}">
+            <input type="hidden" name="cle" value="{{ c.cle }}">
+            <input type="hidden" name="action" value="approve">
+            <button class="ok">Accepter</button>
+          </form>
+          <form method="post" action="{{ url_for('national_decision') }}">
+            <input type="hidden" name="cle" value="{{ c.cle }}">
+            <input type="hidden" name="action" value="reject">
+            <button class="no">Refuser</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table></div>
+    {% else %}<p class="muted">Aucune demande en attente.</p>{% endif %}
+
+    <h2>Destinataires actifs ({{ national.actifs_total }})</h2>
+    {% if national.approved %}
+    <div class="scroll"><table>
+      <tr><th>Nom</th><th>Contact</th><th>Villes suivies</th><th></th></tr>
+      {% for c in national.approved %}
+      <tr>
+        <td>{{ c.name or '—' }}</td>
+        <td class="muted">{{ c.address }}<br><span class="tag">{{ c.channel }}</span></td>
+        <td class="muted">{{ c.zones_libelles|join(', ') if c.zones_libelles else '—' }}</td>
+        <td style="white-space:nowrap">
+          <form method="post" action="{{ url_for('national_decision') }}">
+            <input type="hidden" name="cle" value="{{ c.cle }}">
+            <input type="hidden" name="action" value="reject">
+            <button class="no">Retirer</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+    {% if national.fixes %}
+    <p class="muted" style="margin-top:.6rem">
+      + {{ national.fixes }} destinataire{{ 's' if national.fixes > 1 }} fixe{{ 's' if national.fixes > 1 }}
+      défini{{ 's' if national.fixes > 1 }} dans le .env du projet national (non modifiable ici).
+    </p>
+    {% endif %}
+
+    {% if national.rejected %}
+    <details class="rejected">
+      <summary>{{ national.rejected|length }} personne{{ 's' if national.rejected|length > 1 }} refusée{{ 's' if national.rejected|length > 1 }} ou retirée{{ 's' if national.rejected|length > 1 }}</summary>
+      <div class="scroll"><table>
+        <tr><th>Nom</th><th>Contact</th><th></th></tr>
+        {% for c in national.rejected %}
+        <tr>
+          <td>{{ c.name or '—' }}</td>
+          <td class="muted">{{ c.address }}</td>
+          <td>
+            <form method="post" action="{{ url_for('national_decision') }}">
+              <input type="hidden" name="cle" value="{{ c.cle }}">
+              <input type="hidden" name="action" value="approve">
+              <button class="ok">Réintégrer</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </table></div>
+    </details>
+    {% endif %}
+
+    {% if national.zones %}
+    <h2>Annonces par ville</h2>
+    <div class="scroll"><table>
+      <tr><th>Ville</th><th>Annonces</th></tr>
+      {% for cle, nombre in national.zones %}
+      <tr><td>{{ cle }}</td><td>{{ nombre }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+  </div>
+  {% endif %}{# fin vue national #}
+
+  </div>{# .contenu #}
+  </div>{# .layout #}
 </div>
 </body>
 </html>
