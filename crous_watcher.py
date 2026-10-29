@@ -204,7 +204,18 @@ def sync_telegram_subscribers():
             elif info["status"] == subscriber_store.STATUS_PENDING:
                 to_notify.append((chat_id, "🕐 Ta demande est toujours en attente de validation."))
             elif info["status"] == subscriber_store.STATUS_REJECTED:
-                to_notify.append((chat_id, "❌ Ta demande d'accès a été refusée par l'administrateur."))
+                # Un refus n'est pas un bannissement : la personne peut refaire
+                # une demande, qui repart en attente. La décision reste à
+                # l'admin — un /start ne réactive jamais l'accès tout seul.
+                info["status"] = subscriber_store.STATUS_PENDING
+                info["name"] = name or info.get("name", "")
+                info["requested_at"] = subscriber_store.now_iso()
+                info["decided_at"] = None
+                info["reinscription"] = True  # repère pour le dashboard
+                log.info("Nouvelle demande après refus : %s (%s)", chat_id, name)
+                to_notify.append((chat_id,
+                    "🕐 Ta nouvelle demande a bien été reçue et est en attente "
+                    "de validation par l'administrateur."))
             # approved -> pas de message, pas de spam
 
         store["last_update_id"] = new_update_id

@@ -135,7 +135,9 @@
     <tr><th>Nom</th><th>Chat ID</th><th>Demandé le</th><th></th></tr>
     {% for s in pending %}
     <tr>
-      <td>{{ s.name or '—' }}</td>
+      <td>{{ s.name or '—' }}
+        {% if s.reinscription %}<br><span class="tag" title="Cette personne avait déjà été refusée ou retirée">↩️ déjà refusé</span>{% endif %}
+      </td>
       <td class="muted">{{ s.chat_id }}</td>
       <td class="muted">{{ s.requested_at[:16].replace('T',' ') if s.requested_at }}</td>
       <td style="white-space:nowrap">
